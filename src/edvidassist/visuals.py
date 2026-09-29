@@ -31,7 +31,34 @@ def _get_movie_duration(movie_path: Path) -> float:
         return 0.0
 
 
-def acquire_visuals(script: str, config: Config, movie_path: Path | None = None) -> list[Path]:
+def acquire_visuals(
+    script: str,
+    config: Config,
+    movie_path: Path | None = None,
+    visuals_dir: Path | None = None,
+) -> list[Path]:
+    out_dir = config.work_dir / "visuals"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Strategy 0: Agent provided curated visual clips directory
+    if visuals_dir and Path(visuals_dir).exists():
+        provided_clips = sorted(
+            [p for p in Path(visuals_dir).glob("*.mp4") if p.is_file()],
+            key=lambda x: x.name,
+        )
+        if provided_clips:
+            normalized_clips = []
+            for i, p in enumerate(provided_clips):
+                norm_p = out_dir / f"provided_{i:03d}.mp4"
+                subprocess.run([
+                    "ffmpeg", "-y", "-i", str(p),
+                    "-vf", "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080",
+                    "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                    "-an", "-r", "24", "-pix_fmt", "yuv420p", str(norm_p),
+                ], check=True, capture_output=True)
+                normalized_clips.append(norm_p)
+            return normalized_clips
+
     sys_prompt = """Split this voiceover into 3-5 visual scenes. For each, provide a short
 English search query suitable for stock video search (nature, contemplation, abstract concepts).
 Total duration must equal voiceover audio duration."""
@@ -51,9 +78,6 @@ Total duration must equal voiceover audio duration."""
         raise click.UsageError("Failed to parse visual scenes JSON.")
 
     scenes = data.get("scenes", [])
-    out_dir = config.work_dir / "visuals"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     out_clips: list[Path] = []
     movie_dur = _get_movie_duration(movie_path) if movie_path and movie_path.exists() else 0.0
 
@@ -100,7 +124,6 @@ Total duration must equal voiceover audio duration."""
         # Strategy 2: Extract cinematic B-roll moments from the movie itself
         if not fetched and movie_path and movie_dur > 30.0:
             try:
-                # Distribute timestamps across movie timeline (between 10% and 85%)
                 step = 0.75 / max(1, len(scenes))
                 offset_ratio = 0.10 + i * step
                 start_sec = max(5.0, min(movie_dur - duration - 5.0, movie_dur * offset_ratio))
@@ -121,7 +144,7 @@ Total duration must equal voiceover audio duration."""
             except Exception:
                 fetched = False
 
-        # Strategy 3: Stylized cinematic color background (no ugly raw text)
+        # Strategy 3: Stylized cinematic color background
         if not fetched:
             subprocess.run([
                 "ffmpeg", "-y",

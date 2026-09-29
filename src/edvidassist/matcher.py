@@ -76,7 +76,51 @@ def chunk_subtitles(segments: list[SubSegment], window_sec: float = 30.0) -> lis
     return chunks
 
 
-def match_segments(chunks: list[TranscriptChunk], goals: list[str], config: Config) -> list[EditSegment]:
+def _pad_and_merge_segments(
+    segments: list[EditSegment],
+    padding_before: float = 0.4,
+    padding_after: float = 0.6,
+    gap_merge_threshold: float = 30.0,
+    max_duration: float = 300.0,
+) -> list[EditSegment]:
+    if not segments:
+        return []
+
+    # Apply padding
+    padded: list[EditSegment] = []
+    for s in segments:
+        start = max(0.0, s.start - padding_before)
+        end = s.end + padding_after
+        padded.append(EditSegment(start=start, end=end, goal=s.goal, reason=s.reason))
+
+    padded.sort(key=lambda x: x.start)
+
+    # Merge overlapping or close segments
+    merged: list[EditSegment] = [padded[0]]
+    for next_seg in padded[1:]:
+        curr = merged[-1]
+        gap = next_seg.start - curr.end
+        potential_duration = next_seg.end - curr.start
+
+        if gap <= gap_merge_threshold and potential_duration <= max_duration:
+            # Merge into curr
+            curr.end = max(curr.end, next_seg.end)
+            if curr.goal != next_seg.goal and next_seg.goal not in curr.goal:
+                curr.goal = f"{curr.goal} & {next_seg.goal}"
+            curr.reason = f"{curr.reason} [...] {next_seg.reason}"
+        else:
+            merged.append(next_seg)
+
+    return merged
+
+
+def match_segments(
+    chunks: list[TranscriptChunk],
+    goals: list[str],
+    config: Config,
+    padding: float = 0.5,
+    merge_gap: float = 30.0,
+) -> list[EditSegment]:
     if not chunks or not goals:
         return []
 
@@ -129,21 +173,24 @@ Rules:
                     start=float(s["start"]),
                     end=float(s["end"]),
                     goal=s["goal"],
-                    reason=s["clip_text"],  # actual subtitle text
+                    reason=s["clip_text"],
                 ))
             result.sort(key=lambda x: x.start)
 
-            total = 0.0
-            for i, s in enumerate(result):
-                if s.end - s.start > config.max_segment_duration:
-                    raise ValueError(f"Segment > {config.max_segment_duration}s")
-                if i > 0 and s.start < result[i-1].end:
-                    raise ValueError("Overlapping segments")
-                total += s.end - s.start
-            if total > config.max_total_duration - 120:
-                raise ValueError("Total duration exceeded")
+            # Post-process: add dialogue padding and merge tight gaps
+            refined = _pad_and_merge_segments(
+                result,
+                padding_before=padding,
+                padding_after=padding + 0.2,
+                gap_merge_threshold=merge_gap,
+                max_duration=float(config.max_segment_duration),
+            )
 
-            return result
+            total = sum(s.end - s.start for s in refined)
+            if total > config.max_total_duration - 120:
+                raise ValueError("Total duration exceeded after padding")
+
+            return refined
 
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             if attempt == 2:

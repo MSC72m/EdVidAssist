@@ -35,7 +35,7 @@ def _marker_clip(label: str, duration: float, out: Path) -> None:
     _run([
         "ffmpeg", "-y",
         "-f", "lavfi", "-i", f"color=black:s=1920x1080:d={duration}",
-        "-f", "lavfi", "-i", f"anullsrc=r=48000:cl=stereo",
+        "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
         "-vf", (
             f"drawtext=text='{safe}':fontcolor=white:fontsize=36"
             ":x=(w-text_w)/2:y=(h-text_h)/2"
@@ -50,7 +50,31 @@ def _marker_clip(label: str, duration: float, out: Path) -> None:
     ])
 
 
-def build_outro(visual_clips: list[Path], voiceover_path: Path, config: Config) -> Path:
+def _generate_ambient_bed(duration: float, out_path: Path) -> Path:
+    """Synthesize warm ambient chord pad when no custom music is provided."""
+    _run([
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", f"sine=frequency=110:duration={duration + 2.0}",
+        "-f", "lavfi", "-i", f"sine=frequency=164.81:duration={duration + 2.0}",
+        "-f", "lavfi", "-i", f"sine=frequency=220:duration={duration + 2.0}",
+        "-filter_complex", (
+            "[0:a][1:a][2:a]amix=inputs=3[chord];"
+            "[chord]lowpass=f=350,volume=0.20,afade=t=in:st=0:d=1.5,afade=t=out:st="
+            f"{max(0.0, duration - 2.0)}:d=2.0[pad]"
+        ),
+        "-map", "[pad]",
+        "-c:a", "aac", "-ar", "48000", "-ac", "2",
+        str(out_path),
+    ])
+    return out_path
+
+
+def build_outro(
+    visual_clips: list[Path],
+    voiceover_path: Path,
+    config: Config,
+    music_path: Path | None = None,
+) -> Path:
     out_path = config.work_dir / "outro.mp4"
     if not visual_clips:
         return out_path
@@ -60,31 +84,57 @@ def build_outro(visual_clips: list[Path], voiceover_path: Path, config: Config) 
     td = config.transition_duration
     filter_strs = []
 
+    # 1. Video crossfades
     if N > 1:
         for i in range(N - 1):
             offset = sum(durations[:i+1]) - (i + 1) * td
             in1 = "[0:v]" if i == 0 else f"[v_mix_{i-1}]"
             filter_strs.append(
-                f"{in1}[{i+1}:v]xfade=transition=fade:duration={td}:offset={offset}[v_mix_{i}]"
+                f"{in1}[{i+1}:v]xfade=transition=fade:duration={td}:offset={offset:.2f}[v_mix_{i}]"
             )
         v_out = f"[v_mix_{N-2}]"
     else:
         v_out = "[0:v]"
 
+    total_outro_dur = sum(durations) - max(0, N - 1) * td
+
+    # 2. Background music bed + audio ducking
+    music_file: Path
+    if music_path and Path(music_path).exists():
+        music_file = Path(music_path)
+    else:
+        ambient_out = config.work_dir / "ambient_bed.aac"
+        _generate_ambient_bed(total_outro_dur + 2.0, ambient_out)
+        music_file = ambient_out
+
+    # Inputs:
+    # 0..N-1: visual clips
+    # N: voiceover_path
+    # N+1: music_file
     cmd = ["ffmpeg", "-y"]
     for c in visual_clips:
         cmd.extend(["-i", str(c)])
     cmd.extend(["-i", str(voiceover_path)])
+    cmd.extend(["-i", str(music_file)])
 
-    if filter_strs:
-        cmd.extend(["-filter_complex", "; ".join(filter_strs), "-map", v_out])
-    else:
-        cmd.extend(["-map", "0:v"])
+    # Sidechain audio ducking with asplit
+    voice_idx = N
+    music_idx = N + 1
+    filter_strs.append(f"[{music_idx}:a]volume=0.22,aloop=loop=-1:size=2e+09[music_loop]")
+    filter_strs.append(f"[{voice_idx}:a]asplit=2[voice_sc][voice_mix]")
+    filter_strs.append(
+        f"[music_loop][voice_sc]sidechaincompress=threshold=0.08:ratio=5:attack=80:release=450[ducked_music]"
+    )
+    filter_strs.append(f"[ducked_music][voice_mix]amix=inputs=2:duration=longest:dropout_transition=2[aout]")
+    filter_complex_str = "; ".join(filter_strs)
 
     cmd.extend([
-        "-map", f"{N}:a",
+        "-filter_complex", filter_complex_str,
+        "-map", v_out,
+        "-map", "[aout]",
         "-c:v", "libx264", "-crf", "18", "-preset", "fast",
         "-c:a", "aac", "-ar", "48000", "-ac", "2", "-r", "24",
+        "-t", f"{total_outro_dur:.2f}",
         str(out_path),
     ])
     _run(cmd)
@@ -141,7 +191,7 @@ def _concat_with_transitions(clips: list[Path], out_path: Path, config: Config) 
         offset = sum(durations[:i+1]) - (i + 1) * td
         in1 = "[0:v]" if i == 0 else f"[v_{i-1}]"
         filter_strs.append(
-            f"{in1}[{i+1}:v]xfade=transition=dissolve:duration={td}:offset={offset}[v_{i}]"
+            f"{in1}[{i+1}:v]xfade=transition=dissolve:duration={td}:offset={offset:.2f}[v_{i}]"
         )
 
     a_inputs = "".join(f"[{i}:a]" for i in range(N))
