@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+*.egg
+
+# Env
+.env
+.env.*
+
+# Work dirs and outputs
+.edvidassist_work/
+output/
+output_*/
+
+# Test artifacts
+dummy.srt
+test_*.py
+typst.tar.xz
+typst-aarch64-apple-darwin/
+
+# macOS
+.DS_Store
+
+# uv
+.python-version
+docs/examples/*.mp4
