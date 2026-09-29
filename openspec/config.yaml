@@ -1,0 +1,18 @@
+schema: spec-driven
+
+context: |
+  Tech stack: Python >=3.11, uv, litellm, pymupdf, pysubs2, ffmpeg, typst.
+  Domain: EdVidAssist — converts movie + educational Persian PDF into ≤15min compilation video + RTL Persian companion PDF (ندای وظیفه format).
+  Key conventions:
+    - Boring over clever; minimal dependencies and concise diffs.
+    - Ground all extracted themes/goals in actual film transcript and dialogue, not the reference PDF's example film.
+    - Video assembly: frame-accurate cuts (-ss before -i, re-encode to 1080p 24fps), xfade transitions, ambient bed with sidechain ducking.
+    - PDF output: Typst RTL template matching exact 7-section ندای وظیفه booklet layout.
+    - Agent skills: interoperable across Claude Code, OpenCode, Pi, Codex, and OMP.
+
+rules:
+  proposal:
+    - Keep proposals concise and technically grounded.
+    - State exact files, interfaces, and verification steps.
+  tasks:
+    - Ordered by dependency, ending with end-to-end runnable verification.
