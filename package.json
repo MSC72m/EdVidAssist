@@ -1,0 +1,35 @@
+{
+  "name": "edvidassist",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Semantic video extraction and instructor companion PDF generator for educational film analysis",
+  "main": "bin/edvidassist.js",
+  "bin": {
+    "edvidassist": "./bin/edvidassist.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "templates",
+    "SKILL.md",
+    "AGENTS.md",
+    "pyproject.toml"
+  ],
+  "scripts": {
+    "start": "node bin/edvidassist.js",
+    "test": "uv run python -m py_compile src/edvidassist/*.py"
+  },
+  "keywords": [
+    "video-editing",
+    "ffmpeg",
+    "agent-skills",
+    "claude-code",
+    "opencode",
+    "pi",
+    "edvidassist",
+    "persian-pdf",
+    "typst"
+  ],
+  "author": "MSC72m",
+  "license": "AGPL-3.0"
+}
